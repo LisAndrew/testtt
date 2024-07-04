@@ -17,7 +17,7 @@ on:
         description: 'Skip rebase check(true or false)'
         required: false
         default: 'false'
-        type: choise
+        type: string
   pull_request:
   push:
     branches:

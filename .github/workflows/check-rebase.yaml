@@ -1,0 +1,61 @@
+name: Check Commit Behind main
+
+on:
+  workflow_dispatch:
+    inputs:
+      skipRebaseCheck:
+        description: 'Skip rebase check'
+        type: string
+        required: false
+        default: 'false'
+  workflow_call:
+    inputs:
+      skipRebaseCheck:
+        type: string
+        required: false
+        default: 'false'
+  pull_request:
+  push:
+    branches:
+      - main
+
+
+jobs:
+  check-behind-main:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Set variables for workflow_dispatch
+      if: ${{ github.event_name == 'workflow_dispatch' }}
+      run: |
+        echo "BRANCH_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+        echo "SKIP_REBASE_CHECK=${{ github.event.inputs.skipRebaseCheck }}" >> $GITHUB_ENV
+
+    - name: Set variables for pull_request or push
+      if: ${{ github.event_name != 'workflow_dispatch' }}
+      run: |
+        echo "BRANCH_NAME=${{ github.head_ref }}" >> $GITHUB_ENV
+        echo "SKIP_REBASE_CHECK=false" >> $GITHUB_ENV
+
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Fetch all branches
+      run: git fetch --all
+
+    - name: Check commits behind main
+      run: |
+        source $GITHUB_ENV
+        if [ "$SKIP_REBASE_CHECK" == "false" ]; then
+          N_COMMITS_BEHIND_MAIN=$(git rev-list --left-only --count origin/main..origin/$BRANCH_NAME)
+          echo "N_COMMITS_BEHIND_MAIN=$N_COMMITS_BEHIND_MAIN" >> $GITHUB_ENV
+
+          if [ "$N_COMMITS_BEHIND_MAIN" -ne "0" ]; then
+            echo "Current branch is behind main by $N_COMMITS_BEHIND_MAIN commits, please make rebase first!"
+            exit 1
+          else
+            echo "Check passed successfully! The branch is up-to-date with main."
+          fi
+        else
+          echo "Rebase check is skipped."
+        fi

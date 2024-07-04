@@ -1,0 +1,84 @@
+name: Run pylint and nbqa for all files
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  workflow_call:
+    inputs: { }
+
+permissions:
+  contents: write
+  issues: read
+  checks: write
+  pull-requests: write
+
+env:
+  PROJECT_FOLDER: "${{ github.workspace }}"
+  TASK_FOLDER: "${{ github.workspace }}/products"
+  PYLINT_REP: "pylint-report.md"
+
+jobs:
+  setup-and-test:
+    name: Setup and Run Pylint and nbqa Evaluation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup micromamba Environment
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          environment-file: ${{ github.workspace }}/conda-lock.yml
+          environment-name: "lai-${{ github.sha }}"
+          init-shell: none
+          generate-run-shell: true
+          log-level: debug
+
+      - name: Validate Workspace Path
+        run: |
+          echo ${{ github.workspace }}
+
+      - name: Run linting commands
+        if: always()
+        shell: micromamba-shell {0}
+        run: |
+          source $PROJECT_FOLDER/install-all-poetry-pkgs.sh $TASK_FOLDER
+          COMMANDS_ARRAY=("pylint \$TASK_FOLDER --recursive=y --errors-only" "nbqa pylint \$TASK_FOLDER --recursive=y --errors-only --disable E1142")
+          LINT_ERRORS=""
+          for COMMAND in "${COMMANDS_ARRAY[@]}"; do
+              echo ">>>>  START $COMMAND in [lai-${{ github.sha }}-${{ runner.name }}] env"
+              LINT_RESPONSE=$(eval $COMMAND 2>&1)
+              LINT_EXIT_CODE=$?
+              # Save results
+              if [ $LINT_EXIT_CODE -ne 0 ]; then
+                  LINT_ERRORS+=">>>>  ${COMMAND}_ERROR START\n"
+                  LINT_ERRORS+="$LINT_RESPONSE\n"
+                  LINT_ERRORS+=">>>>  ${COMMAND}_ERROR FINISH\n"
+              fi
+              echo "$LINT_RESPONSE"
+              echo ">>>>  FINISH $COMMAND in [lai-${{ github.sha }}-${{ runner.name }}] env, OK"
+              echo "$LINT_ERRORS" >> $PYLINT_REP
+          done
+          if [ -n "$LINT_ERRORS" ]; then
+              echo -e ">>>>  Fix errors"
+              exit 1
+          else
+              echo PYLINT_RESPONSE="**Lint check successful**" >> $PYLINT_REP
+          fi
+
+      - name: Add Lint Report to Job Summary
+        run: cat $PYLINT_REP >> $GITHUB_STEP_SUMMARY
+
+      - name: Create GitHub Check Run with Lint Report
+        uses: LouisBrunner/checks-action@v2.0.0
+        if: always()
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: Lint Report
+          conclusion: "success"
+          output: |
+            {"summary": ""}
+          output_text_description_file: ${{ env.PYLINT_REP }}

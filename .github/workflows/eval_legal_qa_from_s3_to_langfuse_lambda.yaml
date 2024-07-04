@@ -1,0 +1,146 @@
+name: Run RAG pipeline evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      backendFilter:
+        type: string
+        description: Regex filter backends pattern
+        default: ""
+        required: false
+      testDatasetName:
+        type: string
+        description: Test dataset name on Langfuse
+        default: "manual-test-qna-new-1"
+        required: false
+    # schedule:
+    #   # Runs at 00:00 on Sunday (UTC).
+    #   - cron: '0 0 * * 0'
+
+permissions:
+  contents: write
+  issues: read
+  checks: write
+  pull-requests: write
+
+env:
+  PROJECT_FOLDER: "${{ github.workspace }}"
+  TASK_FOLDER: "${{ github.workspace }}/products"
+  RAG_EVAL_FOLDER: "${{ github.workspace }}/products/rag-eval-common/src/allied_lai/common/rag_eval"
+  AGGR_EVAL_RESULTS_MD_FILE: "aggr_eval_results.md"
+  AGGR_EVAL_RESULTS_CSV_FILE: "aggr_eval_results.csv"
+  LOG_FILE: "eval.log"
+
+jobs:
+  setup-and-test:
+    name: Setup and Run RAG Evaluation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup micromamba Environment
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          environment-file: ${{ github.workspace }}/conda-lock.yml
+          environment-name: "lai-${{ github.sha }}"
+          init-shell: none
+          generate-run-shell: true
+          log-level: debug
+
+      - name: Validate Workspace Path
+        run: |
+          echo ${{ github.workspace }}
+
+      - name: Install Poetry Dependencies
+        id: poetry_install
+        if: always()
+        shell: micromamba-shell {0}
+        run: |
+          poetry install --directory ${TASK_FOLDER}/rag-eval-common || poetry install --directory ${TASK_FOLDER}/rag-eval-common
+
+      - name: Run RAG Evaluation Script
+        if: steps.poetry_install.outcome == 'success'
+        shell: micromamba-shell {0}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ORG_ID: ${{ secrets.OPENAI_ORG_ID }}
+          LEGAL_AI_EVAL_MODEL_TYPES: ${{ vars.LEGAL_AI_EVAL_MODEL_TYPES }}
+          LEGAL_AI_IS_QUERY_ONLY_FOR_EVAL_SUBSET: ${{ vars.LEGAL_AI_IS_QUERY_ONLY_FOR_EVAL_SUBSET }}
+          LEGAL_AI_OPENAI_EVAL_MODEL_ID: ${{ vars.OPENAI_EVAL_MODEL_ID }}
+          LEGAL_AI_BEDROCK_REGION: ${{ vars.LEGAL_AI_BEDROCK_REGION }}
+          LEGAL_AI_BEDROCK_EVAL_MODEL_ID: ${{ vars.LEGAL_AI_BEDROCK_EVAL_MODEL_ID }}
+          LEGAL_AI_BEDROCK_EMB_MODEL_ID: ${{ vars.LEGAL_AI_BEDROCK_EMB_MODEL_ID }}
+          LEGAL_AI_BACKENDS_LAMBDA_NAME: ${{ secrets.LEGAL_AI_BACKENDS_LAMBDA_NAME }}
+          LEGAL_AI_BACKENDS_LAMBDA_REGION: ${{ vars.LEGAL_AI_BACKENDS_LAMBDA_REGION }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LEGAL_AI_BACKENDS_REGEX_FILTER_PATTERN: ${{ github.event.inputs.backendFilter }}
+          LANGFUSE_DATASET_NAME: ${{ github.event.inputs.testDatasetName }}
+          LANGFUSE_THREADS: 4
+        run: |
+          echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "OPENAI_ORG_ID=${OPENAI_ORG_ID}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LEGAL_AI_EVAL_MODEL_TYPES=${LEGAL_AI_EVAL_MODEL_TYPES}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LEGAL_AI_IS_QUERY_ONLY_FOR_EVAL_SUBSET=${LEGAL_AI_IS_QUERY_ONLY_FOR_EVAL_SUBSET}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LEGAL_AI_OPENAI_EVAL_MODEL_ID=${LEGAL_AI_OPENAI_EVAL_MODEL_ID}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LEGAL_AI_BEDROCK_REGION=${LEGAL_AI_BEDROCK_REGION}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LEGAL_AI_BEDROCK_EVAL_MODEL_ID=${LEGAL_AI_BEDROCK_EVAL_MODEL_ID}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LEGAL_AI_BEDROCK_EMB_MODEL_ID=${LEGAL_AI_BEDROCK_EMB_MODEL_ID}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LEGAL_AI_BACKENDS_LAMBDA_NAME=${LEGAL_AI_BACKENDS_LAMBDA_NAME}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LEGAL_AI_BACKENDS_LAMBDA_REGION=${LEGAL_AI_BACKENDS_LAMBDA_REGION}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LEGAL_AI_BACKENDS_REGEX_FILTER_PATTERN=${LEGAL_AI_BACKENDS_REGEX_FILTER_PATTERN}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LANGFUSE_DATASET_NAME=${LANGFUSE_DATASET_NAME}" >> ${TASK_FOLDER}/rag-eval-common/.env
+          echo "LANGFUSE_THREADS=${LANGFUSE_THREADS}" >> ${TASK_FOLDER}/rag-eval-common/.env
+
+          cd ${TASK_FOLDER}/rag-eval-common
+          echo "Start evaluation script"
+          python -m allied_lai.common.rag_eval.run_evaluation
+
+      - name: Upload RAG Evaluation Aggregate Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: RAG Evaluation Aggregate Results
+          path: "${{ env.RAG_EVAL_FOLDER }}/${{ env.AGGR_EVAL_RESULTS_CSV_FILE }}"
+        if: steps.poetry_install.outcome == 'success'
+
+      - name: Upload RAG Evaluation Run Logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: RAG Evaluation Run Logs
+          path: "${{ env.RAG_EVAL_FOLDER }}/${{ env.LOG_FILE }}"
+        if: steps.poetry_install.outcome == 'success'
+
+      - name: Add RAG Evaluation Aggregate Results to Job Summary
+        run: cat $RAG_EVAL_FOLDER/$AGGR_EVAL_RESULTS_MD_FILE >> $GITHUB_STEP_SUMMARY
+        if: steps.poetry_install.outcome == 'success'
+
+      - name: Add RAG Evaluation Run Logs to Job Summary
+        run: cat $RAG_EVAL_FOLDER/$LOG_FILE >> $GITHUB_STEP_SUMMARY
+        if: steps.poetry_install.outcome == 'success'
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        name: Create GitHub Check Run with RAG Evaluation Aggregate Results
+        if: steps.poetry_install.outcome == 'success'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: RAG Evaluation Aggregate Results
+          conclusion: "success"
+          output: |
+            {"summary": ""}
+          output_text_description_file: ${{ env.RAG_EVAL_FOLDER }}/${{ env.AGGR_EVAL_RESULTS_MD_FILE }}
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        name: Create GitHub Check Run with RAG Evaluation Logs
+        if: steps.poetry_install.outcome == 'success'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: RAG Evaluation Run Logs
+          conclusion: "success"
+          output: |
+            {"summary": ""}
+          output_text_description_file: ${{ env.RAG_EVAL_FOLDER }}/${{ env.LOG_FILE }}

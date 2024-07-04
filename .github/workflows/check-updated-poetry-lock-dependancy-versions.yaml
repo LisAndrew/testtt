@@ -1,0 +1,64 @@
+name: Check updating poetry.lock files
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  issues: read
+  checks: write
+  pull-requests: write
+
+env:
+  PROJECT_FOLDER: "${{ github.workspace }}"
+  TASK_FOLDER: "${{ github.workspace }}/products"
+  UPDATE_POETRY_FOLDER: "update-poetry-locks"
+  TEST_REP: "check_poetry_lock_dependency_version.md"
+
+jobs:
+  setup-and-test:
+    name: Check updating poetry.lock files script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup micromamba Environment
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          environment-file: ${{ github.workspace }}/conda-lock.yml
+          environment-name: "lai-${{ github.sha }}"
+          init-shell: none
+          generate-run-shell: true
+          log-level: debug
+
+      - name: Validate Workspace Path
+        run: |
+          echo ${{ github.workspace }}
+
+      - name: Run test
+        if: always()
+        shell: micromamba-shell {0}
+        run: |
+          # Install necessary dependencies for Pylint
+          poetry install --directory $TASK_FOLDER/$UPDATE_POETRY_FOLDER
+          pytest -v -s $TASK_FOLDER/$UPDATE_POETRY_FOLDER
+
+      - name: Add Test Report to Job Summary
+        if: always()
+        run: cat $PROJECT_FOLDER/$TEST_REP >> $GITHUB_STEP_SUMMARY
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        name: Create GitHub Check Run with Test Report
+        if: always()
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: Test Report
+          conclusion: "success"
+          output: |
+            {"summary": ""}
+          output_text_description_file: ${{ env.PROJECT_FOLDER }}/${{ env.TEST_REP }}

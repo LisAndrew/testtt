@@ -1,0 +1,24 @@
+name: Combined Workflow
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      skipRebaseCheck:
+        description: 'Skip rebase check'
+        type: string
+        required: false
+        default: 'false'
+  push:
+    branches:
+      - main
+
+
+jobs:
+  check-behind:
+    uses: ./.github/workflows/check-rebase.yaml
+    with:
+      skipRebaseCheck: ${{ github.event.inputs.skipRebaseCheck }}
+  linting:
+    needs: check-behind
+    uses: ./.github/workflows/check-pylint.yaml

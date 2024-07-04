@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       skipRebaseCheck:
-        description: 'Skip rebase check'
+        description: 'Skip rebase check(true or false)'
         type: string
         required: false
         default: 'false'

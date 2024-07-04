@@ -6,9 +6,13 @@ on:
     inputs:
       skipRebaseCheck:
         description: 'Skip rebase check'
-        type: string
         required: false
         default: 'false'
+        type: choise
+        options:
+          - true
+          - false
+
   push:
     branches:
       - main
